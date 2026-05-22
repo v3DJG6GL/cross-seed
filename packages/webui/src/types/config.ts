@@ -4,17 +4,40 @@ import { RUNTIME_CONFIG_SCHEMA } from '../../../shared/configSchema';
 
 const runtimeShape = RUNTIME_CONFIG_SCHEMA.shape;
 
-const optionalJsonString = z.string().refine(
+function parseJsonOrUndefined(val: string): unknown {
+  try {
+    return JSON.parse(val);
+  } catch {
+    return undefined;
+  }
+}
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+// Optional string that, when non-empty, must be a JSON object — used for
+// custom webhook payloads. Rejects arrays/primitives so the error surfaces
+// in the form instead of as an opaque server-side failure.
+const optionalJsonObjectString = z.string().refine(
   (val) => {
     if (!val) return true;
-    try {
-      JSON.parse(val);
-      return true;
-    } catch {
-      return false;
-    }
+    return isPlainObject(parseJsonOrUndefined(val));
   },
-  { message: 'Must be valid JSON' },
+  { message: 'Must be a valid JSON object' },
+);
+
+// Optional string that, when non-empty, must be a JSON object whose values
+// are all strings — used for custom webhook headers.
+const optionalJsonHeadersString = z.string().refine(
+  (val) => {
+    if (!val) return true;
+    const parsed = parseJsonOrUndefined(val);
+    return (
+      isPlainObject(parsed) &&
+      Object.values(parsed).every((v) => typeof v === 'string')
+    );
+  },
+  { message: 'Must be a JSON object with string values' },
 );
 
 export const generalValidationSchema = z.object({
@@ -80,9 +103,10 @@ export const connectValidationSchema = z.object({
   sonarr: z.array(z.string().url().or(z.literal(''))).transform((v) => v ?? []),
   notificationWebhookUrls: z.array(
     z.object({
+      id: z.string(),
       url: z.string().url().or(z.literal('')),
-      payload: optionalJsonString,
-      headers: optionalJsonString,
+      payload: optionalJsonObjectString,
+      headers: optionalJsonHeadersString,
     }),
   ),
 });

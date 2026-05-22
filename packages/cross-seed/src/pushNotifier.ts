@@ -38,20 +38,32 @@ interface PushNotification {
 	extra?: Record<string, unknown>;
 }
 
-function substituteTemplateVars(
+function substituteTemplateValue(
+	value: unknown,
+	vars: Record<string, string>,
+): unknown {
+	if (typeof value === "string") {
+		return value.replace(
+			/\{(\w+)\}/g,
+			(match, varName: string) => vars[varName] ?? match,
+		);
+	}
+	if (Array.isArray(value)) {
+		return value.map((item) => substituteTemplateValue(item, vars));
+	}
+	if (value !== null && typeof value === "object") {
+		return substituteTemplateVars(value as Record<string, unknown>, vars);
+	}
+	return value;
+}
+
+export function substituteTemplateVars(
 	obj: Record<string, unknown>,
 	vars: Record<string, string>,
 ): Record<string, unknown> {
 	const result: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(obj)) {
-		if (typeof value === "string") {
-			result[key] = value.replace(
-				/\{(\w+)\}/g,
-				(match, varName: string) => vars[varName] ?? match,
-			);
-		} else {
-			result[key] = value;
-		}
+		result[key] = substituteTemplateValue(value, vars);
 	}
 	return result;
 }
@@ -60,6 +72,31 @@ const DEFAULT_HEADERS: Record<string, string> = {
 	"Content-Type": "application/json",
 	"User-Agent": USER_AGENT,
 };
+
+/**
+ * Merge user-supplied headers over the defaults case-insensitively, so a
+ * user override like `content-type` replaces the default `Content-Type`
+ * instead of both being sent.
+ */
+export function mergeHeaders(
+	defaults: Record<string, string>,
+	overrides?: Record<string, string>,
+): Record<string, string> {
+	const merged: Record<string, string> = { ...defaults };
+	if (!overrides) return merged;
+	for (const [key, value] of Object.entries(overrides)) {
+		for (const existing of Object.keys(merged)) {
+			if (
+				existing !== key &&
+				existing.toLowerCase() === key.toLowerCase()
+			) {
+				delete merged[existing];
+			}
+		}
+		merged[key] = value;
+	}
+	return merged;
+}
 
 export class PushNotifier {
 	entries: WebhookEntry[];
@@ -78,28 +115,40 @@ export class PushNotifier {
 			const isObject = typeof entry !== "string";
 			const url = isObject ? entry.url : entry;
 			try {
-				const headers = isObject
-					? { ...DEFAULT_HEADERS, ...entry.headers }
-					: DEFAULT_HEADERS;
+				let headers: Record<string, string> = isObject
+					? mergeHeaders(DEFAULT_HEADERS, entry.headers)
+					: { ...DEFAULT_HEADERS };
 
 				let payload: Record<string, unknown> = isObject
-					? {
-							title,
-							body,
-							message: body,
-							...rest,
-							...entry.payload,
-						}
+					? { title, body, ...rest, ...entry.payload }
 					: { title, body, ...rest };
 
-				if (isObject && entry.payload && templateVars) {
+				if (isObject && templateVars) {
 					payload = substituteTemplateVars(payload, templateVars);
+					headers = substituteTemplateVars(
+						headers,
+						templateVars,
+					) as Record<string, string>;
+				}
+
+				let serializedPayload: string;
+				try {
+					serializedPayload = JSON.stringify(payload);
+				} catch (e) {
+					logger.error(
+						`${url} has an unserializable webhook payload: ${e.message}`,
+					);
+					return {
+						url,
+						ok: false,
+						error: `Invalid payload: ${e.message}`,
+					};
 				}
 
 				const response = await fetch(url, {
 					method: "POST",
 					headers,
-					body: JSON.stringify(payload),
+					body: serializedPayload,
 					signal: AbortSignal.timeout(ms("5 minutes")),
 				});
 
@@ -197,7 +246,7 @@ export function sendResultsNotification(
 				searcheeSource,
 				decisions: formatAsList(decisions, { sort: true }),
 				trackers: trackers.join(", "),
-				result,
+				result: String(result),
 				paused: String(paused),
 				infoHashes: infoHashes.join(", "),
 			},
@@ -279,8 +328,13 @@ export function initializePushNotifier(): void {
 	pushNotifier = new PushNotifier(notificationWebhookUrls);
 }
 
-export async function sendTestNotification(): Promise<WebhookResult[]> {
-	const results = await pushNotifier.notify({
+export async function sendTestNotification(
+	entries?: WebhookEntry[],
+): Promise<WebhookResult[]> {
+	const notifier = new PushNotifier(
+		entries ?? getRuntimeConfig().notificationWebhookUrls,
+	);
+	const results = await notifier.notify({
 		body: "Test notification from cross-seed",
 		templateVars: {
 			source: "TestClient",
@@ -291,7 +345,7 @@ export async function sendTestNotification(): Promise<WebhookResult[]> {
 			searcheeSource: "torrentClient",
 			decisions: "MATCH",
 			trackers: "ExampleTracker",
-			result: InjectionResult.SUCCESS,
+			result: String(InjectionResult.SUCCESS),
 			paused: "false",
 			infoHashes: "abc123def456",
 		},

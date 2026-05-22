@@ -2,7 +2,7 @@ import { z } from "zod";
 import { Action, LinkType, MatchMode } from "./constants.js";
 
 export const WebhookObjectSchema = z.object({
-	url: z.string(),
+	url: z.string().url(),
 	payload: z.record(z.string(), z.unknown()).optional(),
 	headers: z.record(z.string(), z.string()).optional(),
 });

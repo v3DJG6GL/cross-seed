@@ -417,6 +417,21 @@ function addClient(clients: Set<string>, prefix: string, url: unknown): void {
 	}
 }
 
+/**
+ * Canonical dedup key for a webhook entry. A plain string and an object that
+ * only carries `{ url }` describe the same webhook target, so both collapse to
+ * the URL; entries with headers/payload use a stable, key-order-independent key.
+ */
+function webhookKey(entry: WebhookEntry): string {
+	if (typeof entry === "string") return entry;
+	if (!entry.headers && !entry.payload) return entry.url;
+	return JSON.stringify({
+		url: entry.url,
+		headers: entry.headers,
+		payload: entry.payload,
+	});
+}
+
 function collectWebhookUrls(
 	fileConfig: FileConfig,
 ): FileConfig["notificationWebhookUrls"] | undefined {
@@ -424,8 +439,7 @@ function collectWebhookUrls(
 	const entries: NonNullable<FileConfig["notificationWebhookUrls"]> = [];
 	if (Array.isArray(fileConfig.notificationWebhookUrls)) {
 		for (const entry of fileConfig.notificationWebhookUrls) {
-			const key =
-				typeof entry === "string" ? entry : JSON.stringify(entry);
+			const key = webhookKey(entry);
 			if (!seen.has(key)) {
 				seen.add(key);
 				entries.push(entry);

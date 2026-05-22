@@ -193,7 +193,10 @@ program
 	.addOption(verboseOption)
 	.action(
 		withFullRuntime(async () => {
-			await sendTestNotification();
+			const results = await sendTestNotification();
+			if (results.some((result) => !result.ok)) {
+				process.exitCode = 1;
+			}
 		}),
 	);
 

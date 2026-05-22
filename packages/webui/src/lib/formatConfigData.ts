@@ -1,22 +1,40 @@
-import { Config } from '@/types/config';
-import { WebhookObjectSchema } from '../../../shared/configSchema';
+import {
+  RuntimeConfig,
+  WebhookEntry,
+  WebhookObjectSchema,
+} from '../../../shared/configSchema';
+
+let webhookIdCounter = 0;
 
 /**
- * Transforms API config data for the WebUI form.
- * Object webhook entries are mapped to their URL string for display.
+ * Generates a stable, unique id for a webhook form row. Used as the React key
+ * and as the key for per-row UI state so it survives add/remove reordering.
+ * A counter is used rather than `crypto.randomUUID()` because the WebUI may be
+ * served from a non-secure context (LAN IP over HTTP) where it is unavailable.
  */
-export function formatConfigDataForForm(config: Config) {
+export function nextWebhookId(): string {
+  webhookIdCounter += 1;
+  return `webhook-${webhookIdCounter}`;
+}
+
+/**
+ * Transforms API config data for the WebUI form. Webhook entries are normalized
+ * to the form's `{ id, url, payload, headers }` shape, with payload/headers
+ * serialized back to JSON text for editing in the textareas.
+ */
+export function formatConfigDataForForm(config: RuntimeConfig) {
   return {
     ...config,
     ...(config.notificationWebhookUrls && {
       notificationWebhookUrls: config.notificationWebhookUrls.map(
-        (e: unknown) => {
+        (e: WebhookEntry) => {
           if (typeof e === 'string') {
-            return { url: e, payload: '', headers: '' };
+            return { id: nextWebhookId(), url: e, payload: '', headers: '' };
           }
           const parsed = WebhookObjectSchema.safeParse(e);
           if (parsed.success) {
             return {
+              id: nextWebhookId(),
               url: parsed.data.url,
               payload: parsed.data.payload
                 ? JSON.stringify(parsed.data.payload)
@@ -26,35 +44,14 @@ export function formatConfigDataForForm(config: Config) {
                 : '',
             };
           }
-          return { url: '', payload: '', headers: '' };
+          return {
+            id: nextWebhookId(),
+            url: '',
+            payload: '',
+            headers: '',
+          };
         },
       ),
     }),
   };
-  //  return {
-  //    ...config,
-
-  // Update empty array fields to have an empty string so the form
-  // fields show
-  //    dataDirs: config.dataDirs?.length ? config.dataDirs : [''],
-  //    linkDirs: config.linkDirs.length ? config.linkDirs : [''],
-  //    torznab: config.torznab.length ? config.torznab : [''],
-  //    sonarr: config.sonarr?.length ? config.sonarr : [''],
-  //    radarr: config.radarr?.length ? config.radarr : [''],
-  //    notificationWebhookUrls: config.notificationWebhookUrls?.length
-  //      ? config.notificationWebhookUrls
-  //      : [''],
-  //    blockList: config.blockList?.length ? config.blockList : [''],
-  //    excludeOlder: convertNumberToRelativeTime(Number(config.excludeOlder)),
-  //    excludeRecentSearch: convertNumberToRelativeTime(
-  //      Number(config.excludeRecentSearch),
-  //    ),
-  //    rssCadence: convertNumberToRelativeTime(Number(config.rssCadence)),
-  //    searchCadence: convertNumberToRelativeTime(Number(config.searchCadence)),
-  //    snatchTimeout: convertNumberToRelativeTime(Number(config.snatchTimeout)),
-  //    searchTimeout: convertNumberToRelativeTime(Number(config.searchTimeout)),
-  //    torrentClients: config.torrentClients?.length
-  //      ? config.torrentClients
-  //      : [''],
-  //  };
 }

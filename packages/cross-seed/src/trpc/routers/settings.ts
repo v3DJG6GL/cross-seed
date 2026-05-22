@@ -7,10 +7,8 @@ import { getDbConfig, setDbConfig, updateDbConfig } from "../../dbConfig.js";
 import { getDefaultRuntimeConfig } from "../../configuration.js";
 import { omitUndefined } from "../../utils/object.js";
 import { parseRuntimeConfig } from "../../configSchema.js";
-import {
-	initializePushNotifier,
-	sendTestNotification,
-} from "../../pushNotifier.js";
+import { WebhookObjectSchema } from "@cross-seed/shared/configSchema";
+import { sendTestNotification } from "../../pushNotifier.js";
 
 export const settingsRouter = router({
 	get: authedProcedure.query(async () => {
@@ -101,16 +99,21 @@ export const settingsRouter = router({
 		}
 	}),
 
-	testNotification: authedProcedure.mutation(async () => {
-		try {
-			initializePushNotifier();
-			const results = await sendTestNotification();
-			return { results };
-		} catch (error) {
-			logger.error({ label: Label.SERVER, message: error.message });
-			throw new Error(
-				`Failed to send test notification: ${error.message}`,
-			);
-		}
-	}),
+	testNotification: authedProcedure
+		.input(
+			z.object({
+				webhooks: z.array(z.union([z.string(), WebhookObjectSchema])),
+			}),
+		)
+		.mutation(async ({ input }) => {
+			try {
+				const results = await sendTestNotification(input.webhooks);
+				return { results };
+			} catch (error) {
+				logger.error({ label: Label.SERVER, message: error.message });
+				throw new Error(
+					`Failed to send test notification: ${error.message}`,
+				);
+			}
+		}),
 });
